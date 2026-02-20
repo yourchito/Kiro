@@ -70,6 +70,9 @@ jobs:
             }}
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login || '' }}
+
+          # If not set, the script falls back to its built-in default prompt.
+          SPAM_DETECTION_PROMPT: ${{ secrets.SPAM_DETECTION_PROMPT }}
         run: node dist/delete_spam_comments.js
 
       - name: Create workflow summary

@@ -31,37 +31,38 @@ function createBedrockClient(): BedrockRuntimeClient {
 }
 
 /**
+ * Sanitize comment body to prevent prompt injection.
+ * Strips null bytes and limits length; content is passed as a separate user
+ * message (never interpolated into the system prompt) so injection is not
+ * structurally possible, but we still normalise the input defensively.
+ */
+function sanitizeCommentBody(body: string): string {
+  return body
+    .replace(/\0/g, "") // strip null bytes
+    .substring(0, 2000)  // hard cap — model doesn't need more
+    .trim();
+}
+
+/**
  * Use Bedrock to semantically detect spam, including obfuscated/homoglyph content.
+ * The system prompt is required via the SPAM_DETECTION_PROMPT env var.
+ * The comment body is passed as a separate user message so it can never
+ * override or escape the system instructions.
  */
 export async function isSpamComment(body: string): Promise<SpamCheckResult> {
   if (!body.trim()) {
     return { isSpam: false, reason: "Empty comment", confidence: 0 };
   }
 
+  const systemPrompt = process.env.SPAM_DETECTION_PROMPT;
+  if (!systemPrompt) {
+    throw new Error("Missing required environment variable: SPAM_DETECTION_PROMPT");
+  }
+
   const client = createBedrockClient();
 
-  const prompt = `You are a spam detection system for GitHub issue comments.
-
-Analyze the following comment and determine if it is spam. Spam includes:
-- Cryptocurrency scams or investment fraud
-- Unsolicited promotions for Telegram/WhatsApp/Discord groups
-- Fake profit or earnings claims ("guaranteed returns", "5x in 24h", etc.)
-- Phishing or obfuscated URLs (e.g. hxxps://, xn-- punycode domains, defanged links)
-- Any message designed to lure users into financial scams
-
-IMPORTANT: The comment may use Unicode tricks, homoglyphs (α→a, ø→o, 𝟛→3), leetspeak, or other obfuscation to evade filters. Analyze the intent, not just the literal characters.
-
-Comment to analyze:
-<comment>
-${body.substring(0, 2000)}
-</comment>
-
-Respond with JSON only:
-{
-  "is_spam": true | false,
-  "confidence": 0.0 to 1.0,
-  "reason": "brief explanation"
-}`;
+  // Sanitize and isolate the comment — never interpolate into the system prompt.
+  const safeBody = sanitizeCommentBody(body);
 
   try {
     const responseBody = await retryWithBackoff(async () => {
@@ -73,7 +74,9 @@ Respond with JSON only:
           anthropic_version: "bedrock-2023-05-31",
           max_tokens: 256,
           temperature: 0.1,
-          messages: [{ role: "user", content: prompt }],
+          system: systemPrompt,
+          // Comment is the sole user message — structurally isolated from instructions.
+          messages: [{ role: "user", content: safeBody }],
         }),
       });
       const response = await client.send(command);
@@ -204,6 +207,11 @@ async function main() {
     process.exit(1);
   }
 
+  if (!process.env.SPAM_DETECTION_PROMPT) {
+    console.error("Missing required environment variable: SPAM_DETECTION_PROMPT");
+    process.exit(1);
+  }
+
   const client = new Octokit({ auth: githubToken });
 
   if (mode === "single" && commentId) {
@@ -217,7 +225,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+// Only run when executed directly (not when imported by tests)
+if (process.env.JEST_WORKER_ID === undefined) {
+  main().catch((err) => {
+    console.error("Fatal error:", err);
+    process.exit(1);
+  });
+}
