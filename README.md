@@ -60,7 +60,7 @@ Import your VS Code setup including extensions and settings during the initial s
 **[📚 View Documentation →](https://kiro.dev/docs/)**
 
 - [Getting Started](https://kiro.dev/docs/getting-started) - Installation and first project setup for IDE and CLI
-- [IDE Guide](https://kiro.dev/docs/ide) - Desktop application features and workflows
+- [IDE Guide](https://kiro.dev/docs/) - Desktop application features and workflows
 - [CLI Guide](https://kiro.dev/docs/cli) - Command-line interface usage and automation
 
 ## Issue Reporting
