@@ -74,9 +74,6 @@ jobs:
           REPOSITORY_NAME: ${{ github.event.repository.name }}
           SCAN_MODE: single
           COMMENT_ID: ${{ github.event.comment.id || inputs.comment_id }}
-
-          # If not set, the script falls back to its built-in default prompt.
-          SPAM_DETECTION_PROMPT: ${{ secrets.SPAM_DETECTION_PROMPT }}
         run: node dist/delete_spam_comments.js
 
       - name: Create workflow summary
