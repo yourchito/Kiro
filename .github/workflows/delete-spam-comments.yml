@@ -11,6 +11,7 @@ on:
         type: number
 
 permissions:
+  id-token: write
   issues: write
   contents: read
   organization: read
@@ -59,15 +60,18 @@ jobs:
         working-directory: scripts
         run: npm run build
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
       - name: Delete spam comments
         working-directory: scripts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
           REPOSITORY_NAME: ${{ github.event.repository.name }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           SCAN_MODE: single
           COMMENT_ID: ${{ github.event.comment.id || inputs.comment_id }}
 
