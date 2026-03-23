@@ -3,30 +3,45 @@ name: Delete Spam Comments
 on:
   issue_comment:
     types: [created]
-  schedule:
-    # Run daily at 2 AM UTC for bulk cleanup of any missed spam
-    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
-      scan_mode:
-        description: "Scan mode: 'bulk' scans all comments, 'single' requires comment_id"
-        required: false
-        default: "bulk"
-        type: choice
-        options:
-          - bulk
-          - single
       comment_id:
-        description: "Comment ID (only for single mode)"
-        required: false
-        type: string
+        description: "Comment ID to check for spam (numeric)"
+        required: true
+        type: number
 
 permissions:
+  id-token: write
   issues: write
   contents: read
+  organization: read
 
 jobs:
+  authorize:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Check org membership
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          STATUS=$(gh api -i "orgs/${{ github.repository_owner }}/members/${{ github.actor }}" 2>/dev/null | head -1 | awk '{print $2}')
+          if [ "$STATUS" = "204" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::@${{ github.actor }} is not an org member — manual trigger denied."
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   delete-spam:
+    needs: [authorize]
+    if: >-
+      always()
+      && (needs.authorize.result == 'skipped' && github.event.comment.user.type != 'Bot')
+      || (needs.authorize.result == 'success' && needs.authorize.outputs.allowed == 'true')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -45,31 +60,20 @@ jobs:
         working-directory: scripts
         run: npm run build
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
       - name: Delete spam comments
         working-directory: scripts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY_OWNER: ${{ github.repository_owner }}
           REPOSITORY_NAME: ${{ github.event.repository.name }}
-          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          # Single-comment mode (event-driven)
-          SCAN_MODE: >-
-            ${{
-              github.event_name == 'issue_comment'
-              && 'single'
-              || inputs.scan_mode
-              || 'bulk'
-            }}
-          COMMENT_ID: >-
-            ${{
-              github.event.comment.id
-              || inputs.comment_id
-              || ''
-            }}
-          COMMENT_BODY: ${{ github.event.comment.body || '' }}
-          COMMENT_AUTHOR: ${{ github.event.comment.user.login || '' }}
+          SCAN_MODE: single
+          COMMENT_ID: ${{ github.event.comment.id || inputs.comment_id }}
         run: node dist/delete_spam_comments.js
 
       - name: Create workflow summary
